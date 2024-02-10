@@ -1,0 +1,3 @@
+energy_function,model_name,energy,time,lr,clamp_grads,patience,min_delta,x0_std
+Energy_Bond_LJ,Bond_LJ_n400_d3,2.112346649169922,13.86188006401062,0.03,1.0,20,1e-06,1.7696610689163208
+Energy_Bond_LJ,Bond_LJ_n400_d3,-0.02448158524930477,13.719823360443115,0.03,1.0,20,1e-06,1.8519539833068848
