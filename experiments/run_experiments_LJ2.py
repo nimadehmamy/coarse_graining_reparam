@@ -2,8 +2,8 @@
 
 # This script runs a set of experiments to compare the performance of the gradient descent minimizer, the CG minimizer and the GNN minimizer
 # on a simple energy function. The energy function is a combination of a quadratic potential along the bonds and a Lennard-Jones potential
-# for the loop formed by the bonds. The energy function is defined in the energy module of the coarsegrainer package. The energy function is
-# defined as a combination of two energy functions, one for the quadratic potential and one for the Lennard-Jones potential. The energy function
+# for the loop formed by the bonds. The energy function is defined in the energy module of the coarsegrainer package. 
+# The energy function is defined as a Lennard-Jones potential with a two-scale coupling matrix. The energy function
 # is defined as a sum of indexed energy functions, which allows for efficient computation of all-to-all energies. The energy function is then
 # used to create a coarse grainer object, which is used to extract the coarse graining modes. The coarse graining modes are then used to create
 # a GNN reparametrization, which is used to create a GNN minimizer. The GNN minimizer is then used to run a set of experiments with different
@@ -59,26 +59,26 @@ x = init_sigma*torch.randn(n, d).to(device)
 energy_params = dict(radius = 1, thres_A = 1e-4, lj_pow = 6, repel_pow = 1, repel_mag = 2.5e-3, 
                 device = 'cuda')
 
-energy_bond_lj = Energy(A_list=[A, .1*vdw], energy_func_list=[quadratic_potential, LJ_potential],
-                        log_name='Energy_Bond_LJ', **energy_params)
-energy_bond_lj(x).item()
+energy_lj = Energy([A_loop], [LJ_potential],log_name='Energy_LJ_2scale', **energy_params)
+
+energy_lj(x).item()
 ## Extract CG modes using multiple samples
-# energy_bond_lj.num_neg_pairs = n**2//2
-# energy_bond_lj.get_indices()
-energy_bond_lj.indices_neg[0].shape
+# energy_lj.num_neg_pairs = n**2//2
+# energy_lj.get_indices()
+energy_lj.indices_neg[0].shape
 t0 = time.time()
 
 # even very few samples yield good quality cg_modes in this case
-k = 10
+k = 40
 # produce k samples with different std for x
-x_samples = init_sigma*torch.randn(k, n, d, device =device)*torch.linspace(3e-0, 8e-0, k)[:, None, None].to(device)
+x_samples = init_sigma*torch.randn(k, n, d, device =device)*torch.linspace(1e-2, 2e-1, k)[:, None, None].to(device)
 
-cg_bond_lj = cg.CG.CoarseGrainer(energy_bond_lj, num_cg_modes=n)
+cg_bond_lj = cg.CG.CoarseGrainer(energy_lj, num_cg_modes=n)
 cg_bond_lj.get_cg_modes(x_samples)
 
 cg_time = time.time() - t0
 
-exp_logger = ExperimentLogger(save_prefix='../results/CG_Bond_LJ_experiments_') 
+exp_logger = ExperimentLogger(save_prefix='../results/CG_LJ2_experiments_2scale_') 
 
 
 ## Bonds + LJ
@@ -108,7 +108,6 @@ init_x_std = x.std().item()
 # learning rates
 lrs = [5e-2, 2e-2, 1e-2]
 lr_cg_factor = [1, 10]
-
 # patience
 patiences = [20]
 # minimum delta
@@ -128,8 +127,7 @@ CLAMP = 1e-1
 
 EPOCHS = 20 
 STEPS = 3000
-
-BASE_MODEL_NAME = 'Bond_LJ'
+BASE_MODEL_NAME = '2LJ'
 
 # The experiment loops 
 for run in range(num_runs):
@@ -137,7 +135,7 @@ for run in range(num_runs):
         for patience in patiences:
             for min_delta in min_deltas:
                 # create the gradient descent minimizer
-                gd_minimizer = EnergyMinimizerPytorch(energy_bond_lj, initial_pos, optimizer_type='Adam', lr=lr, 
+                gd_minimizer = EnergyMinimizerPytorch(energy_lj, initial_pos, optimizer_type='Adam', lr=lr, 
                     clamp_grads=CLAMP, log_step=20, log_pos_step=0, 
                     log_dir='../results/logs', log_name='GD_'+BASE_MODEL_NAME, patience=patience, min_delta=min_delta)
                 # run the gradient descent minimizer
@@ -146,7 +144,7 @@ for run in range(num_runs):
                 for lrcg in lr_cg_factor:
                     for num_cg in num_cg_modes:
                         # create the CG minimizer
-                        cg_minimizer = CGMinimizerPytorch(energy_bond_lj, initial_pos, cg_bond_lj.cg_modes[:,:num_cg], 
+                        cg_minimizer = CGMinimizerPytorch(energy_lj, initial_pos, cg_bond_lj.cg_modes[:,:num_cg], 
                             optimizer_type='Adam', lr=lr, lr_cg=lr*lrcg,
                             clamp_grads=CLAMP, log_step=20, log_pos_step=0, 
                             log_dir='../results/logs', log_name=f'CG_{BASE_MODEL_NAME}{num_cg/n:.2f}', 
@@ -167,7 +165,7 @@ for run in range(num_runs):
                                 bias=True, activation=torch.nn.Tanh()).to(device)
                             gnn_reparam.rescale_output(init_x_std)
                             # create the GNN minimizer
-                            gnn_minimizer = GNNMinimizerPytorch(energy_bond_lj, initial_pos, gnn_reparam, 
+                            gnn_minimizer = GNNMinimizerPytorch(energy_lj, initial_pos, gnn_reparam, 
                                 optimizer_type='Adam', lr=lr, lr_gnn=lr/10*lrcg,
                                 clamp_grads=CLAMP, log_step=20, log_pos_step=0, 
                                 log_dir='../results/logs', log_name=f'GNN_{BASE_MODEL_NAME}{num_cg/n:.2f}',
