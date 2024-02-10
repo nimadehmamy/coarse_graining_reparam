@@ -1,5 +1,5 @@
 import torch
-# import numpy as np
+import numpy as np
 
 
 # we will implement an efficient graph neural network using pytorch
@@ -221,8 +221,10 @@ class GNN(torch.nn.Module):
 # this class includes both the GNN and the initial position as parameters
 # it will take the same inputs as the GNN class and return the reparameterized x
 
+
 class GNNReparam(torch.nn.Module):
-    def __init__(self, hidden_dims, cg, num_cg, latent_sigma, bias=True, activation=torch.nn.ReLU(), GNN_class=GNN):
+    def __init__(self, hidden_dims, cg, num_cg, latent_sigma='auto', 
+                bias=True, activation=torch.nn.ReLU(), GNN_class=GNN):
         """This is a class to implement the graph neural network reparameterization.
         
 
@@ -245,12 +247,24 @@ class GNNReparam(torch.nn.Module):
         self.gnn = GNN_class(hidden_dims, cg, num_cg, bias, activation)
         self.n = cg.cg_modes.shape[0]
         self.get_latent_embedding(latent_sigma)
+        # self.rescale_output(output_init_sigma)
         
     def get_latent_embedding(self, latent_sigma):
         # get the latent embedding
+        if latent_sigma == 'auto':
+            latent_sigma = 1/np.sqrt(self.hidden_dims[0])
+            # we use the std of the initial position to scale the initial position
+            # self.latent_embedding = torch.nn.Parameter(self.gnn(self.initial_pos).std() * torch.randn(self.n, self.gnn.hidden_dims[0]))
         # we use the latent_sigma to scale the initial position
         self.latent_embedding = torch.nn.Parameter(latent_sigma * torch.randn(self.n, self.gnn.hidden_dims[0]))
-                
+        
+        
+    def rescale_output(self, output_init_sigma):
+        # rescale the output to match the std of the initial position
+        init_gnn_std = self().std() 
+        # rescale the weights of the last layer by the ratio of the stds
+        self.gnn.layers[-1].weight.data *= output_init_sigma/init_gnn_std
+        
     def forward(self):
         # compute the reparameterized x
         # assume x is of shape (n, in_features)
