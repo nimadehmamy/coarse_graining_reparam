@@ -38,7 +38,12 @@ V = lambda x: x.detach().cpu().numpy()
 # 1. a strong backbone line graph LJ, where every node is attracted to the next
 # 2. a weaker loop LJ, where every l-th pair of nodes are attracted 
 
-num_nodes, dims = 400, 3
+# either use user input via sys.argv or default values for num_nodes 
+if len(sys.argv) > 1:
+    num_nodes = int(sys.argv[1])
+else:
+    num_nodes = 400 
+dims = 3
 n,d = num_nodes, dims
 loop = 10
 a = 1e-1 # strength of the loop
@@ -77,6 +82,7 @@ cg_bond_lj = cg.CG.CoarseGrainer(energy_bond_lj, num_cg_modes=n)
 cg_bond_lj.get_cg_modes(x_samples)
 
 cg_time = time.time() - t0
+print(f'CG time: {cg_time:.2g}s')
 
 exp_logger = ExperimentLogger(save_prefix='../results/CG_Bond_LJ_experiments_') 
 
