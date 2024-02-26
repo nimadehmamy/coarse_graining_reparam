@@ -298,6 +298,8 @@ class CGMinimizerPytorch(EnergyMinimizerPytorch):
             
     #     return h
             
+    def train_one_stage(self, nsteps):
+        return super().train(nsteps)
     
     # instead of introducing train_full, we could override the train method
     # and call the super().train method for individual stages
@@ -308,14 +310,14 @@ class CGMinimizerPytorch(EnergyMinimizerPytorch):
         # since both stages use the same training loop, we can use the same method
         # h = self.train(nsteps)
         # use the parent train method 
-        h = super().train(nsteps)
+        h = self.train_one_stage(nsteps)
         # now check if early stopping was triggered
         # then, if we were not already in the fine-grained stage, we switch to the fine-grained stage
         if self.early_stopping_triggered and not self.fine_grained:
             self.start_fine_graining()
             # now we train the fine-grained stage
             # h = self.train(nsteps)
-            h = super().train(nsteps)
+            h = self.train_one_stage(nsteps)
             
         return h
     
