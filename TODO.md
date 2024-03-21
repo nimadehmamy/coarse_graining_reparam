@@ -22,3 +22,7 @@ We should change how the logging and running of experiment is done:
 
 1. Let the Minimizer use an external logger class. 
 2. Have the experiment running, updating pairs, and logging be handled  steps. 
+
+
+## Warm-up phase
+do Adam first, before CG
