@@ -36,8 +36,132 @@ from ..earlystopping import EarlyStopping
 
 # Pure pytorch implementation of the EnergyMinimizer
 
+import numpy as np
+# import torch
+from torch.utils.tensorboard import SummaryWriter
 
-class EnergyMinimizerPytorch(torch.nn.Module):
+        
+# We should move the early stopping functionality into its own class
+
+class EarlyStopping:
+    def __init__(self, patience=5, min_delta=0.0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.reset()
+        
+    def reset(self, energy=float('inf')):
+        self.best_energy = energy
+        self.patience_counter = 0
+        self.early_stopping_triggered = False
+        
+    def check_early_stopping(self, energy):
+        if energy < self.best_energy - self.min_delta:
+            self.reset(energy)
+        else:
+            self.patience_counter += 1
+            self.early_stopping_triggered = False
+        if self.patience_counter >= self.patience:
+            self.early_stopping_triggered = True
+            # print("Early stopping")
+            
+# logger class 
+# we want to take out the loggng parts from the minimizer class and experiment logger and put them in a separate class
+# we can then use the logger class in the minimizer and experiment logger
+# the class should be able to log to tensorboard and to a csv file
+# we can also use the class to log the hyperparameters of the model
+
+class EnergyLogger:
+    def __init__(self, x_shape, log_dir='../results/logs', log_name=None, log_step=10, log_pos_step=0,):
+        self.history = dict(time=[], energy=[], x=[])
+        self._last_time = 0.
+        self._log_step = log_step
+        self._log_pos_step = log_pos_step
+        self._time_since_train_start = 0.
+        self._last_time = 0.
+        self.get_log_dir(log_dir, x_shape, log_name)
+        self.writer = SummaryWriter(log_dir=self.log_path)
+        # save hyperparameters
+        self.writer.add_hparams({'log_step': self._log_step, 'log_pos_step': self._log_pos_step,}, {})
+            
+    def get_log_dir(self, log_dir,x_shape, log_name = None):
+        if log_name is not None:
+            self.log_name = log_name
+        else:
+            try: 
+                self.log_name = self.energy_func.__qualname__.split('.')[0].lstrip('get_') 
+            except:
+                try:
+                    self.log_name = self.energy_func.__class__.__name__
+                except:
+                    self.log_name = 'energy'
+        print('Log name:',self.log_name)
+        # use the shape of the initial_pos in the name of the log file
+        self.log_name += f'_n{x_shape[0]}_d{x_shape[1]}'
+        self.log_path = os.path.join(log_dir, self.log_name)
+        print('Logging to:', self.log_path)
+        
+    def start_log_epoch(self):
+        # to get an accurate measure of the time it takes to compute the energy
+        self.update_start_time()
+        # self._time_since_train_start = time.time()
+        self._start_time = time.time()
+        
+    def log(self, step, energy, x=None):
+        # logging costs time, so use it every k steps
+        if step % self._log_step == 0:
+            end_time = time.time()
+            elapsed_time = end_time - self._start_time
+            # total_time = end_time - self._time_since_train_start    
+            self.log_step(step, energy, elapsed_time, x)
+            self._start_time = end_time
+        
+    def log_step(self, batch_idx, energy, elapsed_time, x=None):
+        self.writer.add_scalar('Energy', energy, batch_idx)
+        self.writer.add_scalar('Time', elapsed_time, batch_idx)
+        # also append to history
+        self.history['time'].append(elapsed_time)
+        self.history['energy'].append(energy)
+        if self._log_pos_step > 0 and batch_idx % self._log_pos_step == 0:
+            if x is not None:
+                self.history['x'].append(x.detach().clone().numpy())
+    
+    def update_start_time(self):
+        if self._time_since_train_start == 0:
+            self._time_since_train_start = time.time()
+        else:
+            # we have trained before, so we need to update the time
+            # use the last time logged to update the time since training start
+            self._time_since_train_start = time.time() - self.history['time'][-1] 
+        # we will use self._last_time to update the time since training start
+        self._last_time = time.time()
+    
+# Can we define the energy minimizer a bit more generally?
+# We can define the energy minimizer as a subclass of the PyTorch Module
+# We want the train_step method to be subclass independent
+# the main difference between the subclasses will be the forward method
+# and the parameters that are optimized
+# we only need to change the clamp_grads and the optimizer
+# we can use the same training loop for all subclasses
+# we can also use the same logging and early stopping mechanism
+# we can also use the same plotting method
+# for clamping, we can use the clamp_grads parameter
+# for the optimizer, we can use the optimizer_type parameter
+# we can also use the same logging and early stopping mechanism
+
+
+# Pure pytorch implementation of the EnergyMinimizer
+
+# deprecate EnergyMinimizerPytorch and replace with EnergyMinimizer
+class EnergyMinimizerPytorch(EnergyMinimizer):
+    # raise deprecation warning but initialize the parent class
+    def __init__(self, energy_func, initial_pos, optimizer_type=None, lr=0.1, clamp_grads=1., 
+                log_step=10, log_pos_step=0, log_dir='../results/logs', patience=5, min_delta=0.0, log_name=None, earlystopping=None):
+        print("EnergyMinimizerPytorch is deprecated. Use EnergyMinimizer instead")
+        super().__init__(energy_func, initial_pos, optimizer_type, lr, clamp_grads, 
+                log_step, log_pos_step, log_dir, patience, min_delta, log_name, earlystopping)
+    
+
+class EnergyMinimizer(torch.nn.Module):
     def __init__(self, energy_func, initial_pos, optimizer_type=None, lr=0.1, clamp_grads=1., 
                 log_step=10, log_pos_step=0, log_dir='../results/logs', patience=5, min_delta=0.0, log_name=None, earlystopping=None):
         """This is a class to minimize the energy of a configuration using PyTorch.
@@ -63,23 +187,18 @@ class EnergyMinimizerPytorch(torch.nn.Module):
         self.initialize_pos_params(initial_pos)
         
         self.optimizer = self.get_optimizer(self.parameters(), lr=self.lr)
-        
-        self.history = dict(time=[], energy=[], x=[])
-        self._last_time = 0.
-        self._log_step = log_step
-        self._log_pos_step = log_pos_step
-        self._time_since_train_start = 0.
-        self._last_time = 0.
-        self.best_energy = float('inf')
         if earlystopping is not None:
             self.early_stop = earlystopping
         else:
             self.early_stop = EarlyStopping(patience=patience, min_delta=min_delta)
-        self.get_log_dir(log_dir, initial_pos, log_name)
-        self.writer = SummaryWriter(log_dir=self.log_path)
+        # self.get_log_dir(log_dir, initial_pos, log_name)
+        # self.writer = SummaryWriter(log_dir=self.log_path)
+        self.logger = EnergyLogger(initial_pos.shape, log_dir, log_name, log_step, log_pos_step,)
+        self.history = self.logger.history
         # save hyperparameters
-        self.writer.add_hparams({'lr': self.lr, 'clamp_grads': self.clamp_grads, 'log_step': self._log_step,
-                'log_pos_step': self._log_pos_step, 'patience': self.early_stop.patience, 'min_delta': self.early_stop.min_delta}, {})
+        self.logger.writer.add_hparams({'lr': self.lr, 'clamp_grads': self.clamp_grads, 
+                                        # 'log_step': self.logger._log_step, 'log_pos_step': self.logger._log_pos_step, 
+                                        'patience': self.early_stop.patience, 'min_delta': self.early_stop.min_delta}, {})
         
     # define patience as a property which also updates the early stopping object
     @property
@@ -96,23 +215,6 @@ class EnergyMinimizerPytorch(torch.nn.Module):
     @min_delta.setter
     def min_delta(self, min_delta):
         self.early_stop.min_delta = min_delta
-        
-    def get_log_dir(self, log_dir,x, log_name = None):
-        if log_name is not None:
-            self.log_name = log_name
-        else:
-            try: 
-                self.log_name = self.energy_func.__qualname__.split('.')[0].lstrip('get_') 
-            except:
-                try:
-                    self.log_name = self.energy_func.__class__.__name__
-                except:
-                    self.log_name = 'energy'
-        print('Log name:',self.log_name)
-        # use the shape of the initial_pos in the name of the log file
-        self.log_name += f'_n{x.shape[0]}_d{x.shape[1]}'
-        self.log_path = os.path.join(log_dir, self.log_name)
-        print('Logging to:', self.log_path)
         
     def check_early_stopping(self, energy):
         self.early_stop.check_early_stopping(energy)
@@ -151,51 +253,27 @@ class EnergyMinimizerPytorch(torch.nn.Module):
             param.grad = torch.clamp(param.grad, -self.clamp_grads, self.clamp_grads)
         opt.step()
         return energy.item()
-            
-    def log(self, batch_idx, energy, elapsed_time):
-        self.writer.add_scalar('Energy', energy, batch_idx)
-        self.writer.add_scalar('Time', elapsed_time, batch_idx)
-        # also append to history
-        self.history['time'].append(elapsed_time)
-        self.history['energy'].append(energy)
-        if self._log_pos_step > 0 and batch_idx % self._log_pos_step == 0:
-            self.history['x'].append(self.x.detach().clone().numpy())
-            
+    
     # train the model
-    def train(self, nsteps):
-        # to get an accurate measure of the time it takes to compute the energy
-        self.update_start_time()
-        # self._time_since_train_start = time.time()
-        start_time = time.time()
+    def train(self, nsteps, update_pairs=True):
+        self.logger.start_log_epoch()
+        if update_pairs:
+            self.energy_func.update_neg_pairs()
+            # updating pairs causes the energy to jump, so we need to reset the early stopping
+            self.early_stop.reset()
+        
         for step in range(nsteps):
             energy = self.training_step()
-            
-            # logging costs time, so use it every k steps
-            if step % self._log_step == 0:
-                end_time = time.time()
-                elapsed_time = end_time - start_time
-                # total_time = end_time - self._time_since_train_start    
-                self.log(step, energy, elapsed_time)
-                start_time = end_time
-                # Early stopping        
-                self.check_early_stopping(energy)
+            self.logger.log(step, energy)
+            # Early stopping        
+            self.check_early_stopping(energy)
             if self.early_stopping_triggered:
                 print("Early stopping at step", step)
                 break
         # because we may call train multiple times,
         # the writer will be closed only when the object is deleted
         # self.writer.close()
-        return self.history
-    
-    def update_start_time(self):
-        if self._time_since_train_start == 0:
-            self._time_since_train_start = time.time()
-        else:
-            # we have trained before, so we need to update the time
-            # use the last time logged to update the time since training start
-            self._time_since_train_start = time.time() - self.history['time'][-1] 
-        # we will use self._last_time to update the time since training start
-        self._last_time = time.time()
+        return self.logger.history
     
     def plot_history(self, start=0, end=None):
         if end is None:

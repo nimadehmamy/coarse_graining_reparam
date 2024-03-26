@@ -26,3 +26,11 @@ We should change how the logging and running of experiment is done:
 
 ## Warm-up phase
 do Adam first, before CG
+
+
+# Logs
+
+## 2024-03-26
+we want to make it easier to use the package with an arbitrary energy function. 
+The assumption can be that the energy function takes as input `x` and some possible other args.
+In addition to this, we can have an `.update` method which allows us to update things like the negative pairs (used in all-to-all repulsion). 
