@@ -151,16 +151,6 @@ class EnergyLogger:
 
 # Pure pytorch implementation of the EnergyMinimizer
 
-# deprecate EnergyMinimizerPytorch and replace with EnergyMinimizer
-class EnergyMinimizerPytorch(EnergyMinimizer):
-    # raise deprecation warning but initialize the parent class
-    def __init__(self, energy_func, initial_pos, optimizer_type=None, lr=0.1, clamp_grads=1., 
-                log_step=10, log_pos_step=0, log_dir='../results/logs', patience=5, min_delta=0.0, log_name=None, earlystopping=None):
-        print("EnergyMinimizerPytorch is deprecated. Use EnergyMinimizer instead")
-        super().__init__(energy_func, initial_pos, optimizer_type, lr, clamp_grads, 
-                log_step, log_pos_step, log_dir, patience, min_delta, log_name, earlystopping)
-    
-
 class EnergyMinimizer(torch.nn.Module):
     def __init__(self, energy_func, initial_pos, optimizer_type=None, lr=0.1, clamp_grads=1., 
                 log_step=10, log_pos_step=0, log_dir='../results/logs', patience=5, min_delta=0.0, log_name=None, earlystopping=None):
@@ -199,6 +189,7 @@ class EnergyMinimizer(torch.nn.Module):
         self.logger.writer.add_hparams({'lr': self.lr, 'clamp_grads': self.clamp_grads, 
                                         # 'log_step': self.logger._log_step, 'log_pos_step': self.logger._log_pos_step, 
                                         'patience': self.early_stop.patience, 'min_delta': self.early_stop.min_delta}, {})
+        self.log_name = self.logger.log_name
         
     # define patience as a property which also updates the early stopping object
     @property
@@ -216,9 +207,17 @@ class EnergyMinimizer(torch.nn.Module):
     def min_delta(self, min_delta):
         self.early_stop.min_delta = min_delta
         
+    # also make early_stopping_triggered a property
+    @property
+    def early_stopping_triggered(self):
+        return self.early_stop.early_stopping_triggered
+    @early_stopping_triggered.setter
+    def early_stopping_triggered(self, early_stopping_triggered):
+        self.early_stop.early_stopping_triggered = early_stopping_triggered
+        
     def check_early_stopping(self, energy):
         self.early_stop.check_early_stopping(energy)
-        self.early_stopping_triggered = self.early_stop.early_stopping_triggered
+        # self.early_stopping_triggered = self.early_stop.early_stopping_triggered
         
     def get_optimizer(self, params, **optim_kwargs):
         if self.optimizer_type is not None:
@@ -265,8 +264,9 @@ class EnergyMinimizer(torch.nn.Module):
         for step in range(nsteps):
             energy = self.training_step()
             self.logger.log(step, energy)
-            # Early stopping        
-            self.check_early_stopping(energy)
+            if step % self.logger._log_step == 0:
+                # Early stopping        
+                self.check_early_stopping(energy)
             if self.early_stopping_triggered:
                 print("Early stopping at step", step)
                 break
@@ -285,144 +285,265 @@ class EnergyMinimizer(torch.nn.Module):
         plt.yscale('symlog')
         # plt.show()
         
-
-# To collect and plot results, use a list of dictionaries
-import datetime
-
-import numpy as np
-import pandas as pd
-import seaborn as sns
-
-
-class ExperimentLogger:
-    def __init__(self, save_prefix = '../results/CG_experiment_', previous_results_csv = None):
-        self.results = []
-        self.save_prefix = save_prefix
-        self.current_experiment = None
-        # load previous results as a pd dataframe, if path is given
-        # assume the path is a csv file
-        if previous_results_csv is not None:
-            self.results = pd.read_csv(previous_results_csv).to_dict('records')
-
-    def start_experiment(self, energy_function, # num_nodes, 
-                        model_name):
-        self.current_experiment = {
-            'energy_function': energy_function,
-            # 'num_nodes': num_nodes,
-            'model_name': model_name,
-            'energy': None,
-            'time': None
-        }
         
-
-    def log_result(self, energy, time, **kws):
-        if self.current_experiment is not None:
-            self.current_experiment['energy'] = energy
-            self.current_experiment['time'] = time
-            # allow for additional keyword arguments to be logged
-            self.current_experiment.update(kws)
-
-    def end_experiment(self):
-        if self.current_experiment is not None:
-            self.results.append(self.current_experiment)
-            self.current_experiment = None
+# deprecate EnergyMinimizerPytorch and replace with EnergyMinimizer
+class EnergyMinimizerPytorch(EnergyMinimizer):
+    # raise deprecation warning but initialize the parent class
+    def __init__(self, energy_func, initial_pos, optimizer_type=None, lr=0.1, clamp_grads=1., 
+                log_step=10, log_pos_step=0, log_dir='../results/logs', patience=5, min_delta=0.0, log_name=None, earlystopping=None):
+        print("EnergyMinimizerPytorch is deprecated. Use EnergyMinimizer instead")
+        super().__init__(energy_func, initial_pos, optimizer_type, lr, clamp_grads, 
+                log_step, log_pos_step, log_dir, patience, min_delta, log_name, earlystopping)
     
-    
-    def run_experiment(self, model, epochs=10, steps=5000, log_name=None, **extra_log_kws):
-        self._run_stage(model, epochs, steps, log_name)
-        # log the result
-        self._log_stage(model, **extra_log_kws)
-        # end the experiment
-        self.end_experiment()
-        # save csv after each experiment
-        self.to_csv() 
+
+# we can define the CG minimizer as a subclass of the EnergyMinimizer class
+# The CG minimizer will take a set of cg_modes as inputs and use them to compute the energy
+# the coefficients of the cg_modes will be the optimization variables self.z
+# we will use the same training loop, logging, early stopping mechanism and plotting method
+# we only need to change the forward method and the parameters that are optimized and the optimizer
+# we will also have a method to initialize the cg parameters
+# we will have a coarse grained training step and a fine grained training step
+# we will also have a method to switch between the two stages
+# the switch will be triggered by the early stopping mechanism
+# when switching, we will change the optimizer to the fine grained optimizer
+# we will also reset the early stopping mechanism
+# the get_x method will return the reparameterized x when coarse grained and the original x when fine grained
+
+class CGMinimizer(EnergyMinimizer):
+    def __init__(self, energy_func, initial_pos, cg_modes, optimizer_type=None, lr=0.1, lr_cg=0.1, clamp_grads=1., 
+                log_step=10, log_pos_step=0, log_dir='../results/logs', 
+                patience=5, min_delta=0.0, cg_patience=5, cg_min_delta=0.0, log_name=None, earlystopping=None):
+        super().__init__(energy_func, initial_pos, optimizer_type, lr, clamp_grads, 
+                log_step, log_pos_step, log_dir, patience, min_delta, log_name, earlystopping)
+        self.cg_modes = cg_modes
+        self.lr_cg = lr_cg
+        self.initialize_cg_params(initial_pos)
+        # self.get_cg_optimizer()
+        self.cg_optimizer = self.get_optimizer([self.z], lr=self.lr_cg)
+        # store the original optimizer as the fg_optimizer
+        self.fg_optimizer = self.optimizer
+        # choose the cg optimizer as the optimizer
+        self.optimizer = self.cg_optimizer
+        self.init_CG_hyperparameters(cg_patience, cg_min_delta, patience, min_delta)
+        self.fine_grained = False
+        # add the cg_patience and cg_min_delta to the hyperparameters
+        self.logger.writer.add_hparams({'cg_num': self.cg_modes.shape[1], 'lr_cg': self.lr_cg, 
+            'patience': self.fg_patience, 'min_delta': self.fg_min_delta,
+            'cg_patience': self.cg_patience, 'cg_min_delta': self.cg_min_delta}, {})
         
-    def run_experiment_cg(self, model, cg_mode_time, epochs=10, steps=5000, log_name=None, **extra_log_kws):
-        self._run_stage(model, epochs, steps, log_name)
-        # log the result
-        self._log_stage_cg(model, cg_mode_time, **extra_log_kws)
-        # end the experiment
-        self.end_experiment()
-        # save csv after each experiment
-        self.to_csv()
+    def init_CG_hyperparameters(self, cg_patience, cg_min_delta, fg_patience, fg_min_delta):
+        self.cg_patience = cg_patience
+        self.cg_min_delta = cg_min_delta
+        # during cg, self.patience and self.min_delta should be the cg patience and min_delta
+        # later during fg, we will reset them to the original values
+        # first, keep the originals as fg_patience and fg_min_delta
+        self.fg_patience = fg_patience
+        self.fg_min_delta = fg_min_delta
+        # we are starting with cg, so set the patience and min_delta to the cg values
+        self.patience = cg_patience
+        self.min_delta = cg_min_delta 
         
-    def run_experiment_gnn(self, model, cg_mode_time, epochs=10, steps=5000, log_name=None, **extra_log_kws):
-        self._run_stage(model, epochs, steps, log_name)
-        # log the result
-        self._log_stage_gnn(model, cg_mode_time, **extra_log_kws)
-        # end the experiment
-        self.end_experiment()
-        # save csv after each experiment
-        self.to_csv()
-                
-    def _run_stage(self, model, epochs=10, steps=5000, log_name=None):
-        log_name = log_name or model.log_name
-        # start the experiment
-        self.start_experiment(model.energy_func.log_name, log_name)
-        print(f'Running experiment {log_name}')
-        for i in range(epochs):
-            # train the model
-            # em.early_stopping_triggered = False
-            model.energy_func.update_neg_pairs()
-            h = model.train(steps)
-            print(len(h['energy']), f"{h['energy'][-1]:.3g}, {np.sum(h['time']):.2f}")
-            # log interim result
-            self.log_result(model.history['energy'][-1], np.sum(model.history['time']),)
-            if model.early_stopping_triggered:
-                break
+    def initialize_cg_params(self, initial_pos):
+        # initialize the CG parameters
+        # ensure they are registered as nn.parameters
+        init_z = self.cg_modes.T @ initial_pos.clone().detach()
+        # due to projection onto cg_modes, x has a different scale
+        # we need to scale it back to the original scale
+        # we can use the std of the initial x to scale it back
+        original_sigma_x = initial_pos.std()
+        # get std of cg_modes @ z
+        projected_sigma_x = (self.cg_modes @ init_z).std()
+        self.scaling_factor = original_sigma_x/projected_sigma_x
+        self.z = torch.nn.Parameter((self.scaling_factor*init_z).requires_grad_(True))
+        
+    def get_x(self):
+        # get the position variables
+        # in the CG stage, x = cg_modes @ z
+        # in the fine-grained stage, x = x
+        if self.fine_grained:
+            return self.x
+        else:
+            return self.cg_modes @ self.z
             
-    def _log_stage(self, model, **extra_log_kws):
-        # log the result
-        self.log_result(model.history['energy'][-1], np.sum(model.history['time']),
-                    # log hyperparameters such as patience and min_delta
-                    lr=model.lr, clamp_grads=model.clamp_grads,
-                    patience=model.patience, min_delta=model.min_delta, 
-                    **extra_log_kws)    
+    # toggle fine_grained to switch between the two stages
+    # when turning fine_grained to True, we need to update the value of x
+    # and reset the state of the fine-grained optimizer
+    def start_fine_graining(self):
+        print('Starting fine-graining')
+        self.x.data = self.get_x().data
+        # now that the CG stage has finished, log current `x_cg = self.get_x()` in history as "x_cg"
+        self.history['x_cg'] = self.x.detach().cpu().clone().numpy()
         
-    def _log_stage_cg(self, model, cg_mode_time, **extra_log_kws):
-        self.log_result(model.history['energy'][-1], np.sum(model.history['time'])+cg_mode_time,
-                # log hyperparameters such as patience and min_delta
-                lr=model.lr, lr_cg=model.lr_cg, clamp_grads=model.clamp_grads,
-                patience=model.fg_patience, min_delta=model.fg_min_delta, 
-                cg_patience=model.cg_patience, cg_min_delta=model.cg_min_delta,
-                cg_steps=model.cg_steps, 
-                cg_time=np.sum(model.history['time'][:model.cg_steps])+cg_mode_time, 
-                cg_energy=model.history['energy'][model.cg_steps-1],
-                **extra_log_kws)
+        # reset the state of the fine-grained optimizer
+        self.optimizer = getattr(torch.optim, self.optimizer_type)([self.x], lr = self.lr)
+        self.fg_optimizer = self.optimizer
+        # self.optimizer = self.fg_optimizer
+        self.cg_steps = len(self.history['time'])
+        # change the patience and min_delta to the fine-grained values
+        self.patience = self.fg_patience
+        self.min_delta = self.fg_min_delta
+        self.fine_grained = True
+        # reset the early stopping mechanism
+        self.early_stop.reset()
+
         
-    def _log_stage_gnn(self, model, cg_mode_time, **extra_log_kws):
-        self.log_result(model.history['energy'][-1], np.sum(model.history['time'])+cg_mode_time,
-                # log hyperparameters such as patience and min_delta
-                num_cg_modes=model.gnn.num_cg,
-                lr=model.lr, lr_cg=model.lr_gnn, clamp_grads=model.clamp_grads,
-                patience=model.fg_patience, min_delta=model.fg_min_delta, 
-                cg_patience=model.gnn_patience, cg_min_delta=model.gnn_min_delta,
-                cg_steps=model.gnn_steps, 
-                cg_time=np.sum(model.history['time'][:model.gnn_steps])+cg_mode_time, 
-                cg_energy=model.history['energy'][model.gnn_steps-1],
-                hidden_dims=model.gnn.hidden_dims,
-                **extra_log_kws)
-            
-    def to_dataframe(self):
-        return pd.DataFrame(self.results)
+    # def train_one_stage(self, nsteps):
+    #     return super().train(nsteps)
     
-    def to_csv(self):
-        self.df = self.to_dataframe()
-        self.df.to_csv(self.save_prefix + datetime.datetime.now().strftime("%Y-%m-%d-%H") + '.csv', index=False)
+    # instead of introducing train_full, we could override the train method
+    # and call the super().train method for individual stages
+    # this way, we can use the same training loop for both stages
+    # we can also use the same early stopping mechanism for both stages
+    def train(self, nsteps):
+        # first, we will train the CG stage
+        # use the parent train method 
+        h = super().train(nsteps)
+        # now check if early stopping was triggered
+        # then, if we were not already in the fine-grained stage, we switch to the fine-grained stage
+        if self.early_stopping_triggered and not self.fine_grained:
+            self.start_fine_graining()
+            # now we train the fine-grained stage
+            h = super().train(nsteps)
+            
+        return h
+    
+    # for backward compatibility, we can also define a train_full method
+    # that calls the train method
+    def train_full(self, nsteps):
+        return self.train(nsteps)
+            
+            
+# we will use the GNNReaparam to reparameterize the x variables
+# for the optimization, we will use the same two stage optimization
+# in the first stage the optimization variables will be the GNN parameters 
+# and in the second stage the optimization variables will be the x variables
+# we will use the same EnergyMinimizerPytorch class to perform the optimization
+# the only difference is that we will use the GNN to compute the x variables
+# and we will use the x variables to compute the energy
+# The GNN minimizer will also use the GNN parameters as the optimization variables
+# make this a subclass of the EnergyMinimizerPytorch1 class
+# we will have a method to switch between the two stages
+# the switch will be triggered by the early stopping mechanism
+# when switching, we will change the optimizer to the fine grained optimizer
+# we will also reset the early stopping mechanism
+# the get_x method will return the GNN reparameterized x when coarse grained 
+# and the original x when fine grained
+
+# class GNNMinimizer(EnergyMinimizerPytorch):#
+class GNNMinimizer(EnergyMinimizer):
+    def __init__(self, energy_func, initial_pos, gnn_reparam, optimizer_type=None, lr=0.1, lr_gnn=0.1, clamp_grads=1., 
+                log_step=10, log_pos_step=0, log_dir='../results/logs', 
+                patience=5, min_delta=0.0, gnn_patience=5, gnn_min_delta=0.0, log_name=None, earlystopping=None):
+        super().__init__(energy_func, initial_pos, optimizer_type, lr, clamp_grads, 
+                log_step, log_pos_step, log_dir, patience, min_delta, log_name, earlystopping)
+        self.gnn = gnn_reparam
+        self.lr_gnn = lr_gnn
+        self.optimizer_gnn = self.get_optimizer(self.gnn.parameters(), lr=self.lr_gnn)
+        self.fg_optimizer = self.optimizer
+        self.optimizer = self.optimizer_gnn
+        self.init_GNN_hyperparameters(gnn_patience, gnn_min_delta, patience, min_delta)
+        self.fine_grained = False
+        # add the gnn_patience and gnn_min_delta to the hyperparameters
+        self.logger.writer.add_hparams(
+            {'gnn_hidden_dims': torch.tensor(self.gnn.hidden_dims), 'lr_gnn': self.lr_gnn, 
+            'patience': self.fg_patience, 'min_delta': self.fg_min_delta,
+            'gnn_patience': self.gnn_patience, 'gnn_min_delta': self.gnn_min_delta}, {})
         
-    def plot_results(self, x='time', y='energy', hue='model_name', style='energy_function'):
-        # plot as scatter plot
-        sns.relplot(data = self.df, x=x, y=y, hue=hue, style=style, kind='scatter')
-        # sns.relplot(data = self.df, x=x, y=y, hue=hue, style=style, kind='line')
+    def init_GNN_hyperparameters(self, gnn_patience, gnn_min_delta, fg_patience, fg_min_delta):
+        self.gnn_patience = gnn_patience
+        self.gnn_min_delta = gnn_min_delta
+        # during gnn, self.patience and self.min_delta should be the gnn patience and min_delta
+        # later during fg, we will reset them to the original values
+        # first, keep the originals as fg_patience and fg_min_delta
+        self.fg_patience = fg_patience
+        self.fg_min_delta = fg_min_delta
+        # we are starting with gnn, so set the patience and min_delta to the gnn values
+        self.patience = gnn_patience
+        self.min_delta = gnn_min_delta
         
-    # when object itself is printed, print the dataframe
-    def __repr__(self):
-        # only make the dataframe if it doesn't exist
-        if not hasattr(self, 'df'):
-            self.df = self.to_dataframe()
-        # We wnat ensure that the dataframe displayed in the fancy format in the notebook
-        # so we use the _repr_html_ method
-        return self.df._repr_html_()
-        # return self.df
+    def get_x(self):
+        # get the position variables
+        # in the GNN stage, x = gnn(latent_embedding)
+        # in the fine-grained stage, x = x
+        if self.fine_grained:
+            return self.x
+        else:
+            return self.gnn()
         
+    # toggle fine_grained to switch between the two stages
+    # when turning fine_grained to True, we need to update the value of x
+    # and reset the state of the fine-grained optimizer
+    def start_fine_graining(self):
+        print('Starting fine-graining')
+        self.x.data = self.get_x().data
+        # now that the CG stage has finished, log current `x_cg = self.get_x()` in history as "x_cg"
+        self.history['x_cg'] = self.x.detach().cpu().clone().numpy()
         
+        # reset the state of the fine-grained optimizer
+        self.optimizer = getattr(torch.optim, self.optimizer_type)([self.x], lr = self.lr)
+        self.fg_optimizer = self.optimizer
+        self.gnn_steps = len(self.history['time'])
+        # change the patience and min_delta to the fine-grained values
+        self.patience = self.fg_patience
+        self.min_delta = self.fg_min_delta
+        self.fine_grained = True
+        # reset the early stopping mechanism
+        self.early_stop.reset()
+    
+    # We also want a full training loop that can switch between the two stages
+    # we will use the same training loop as before
+    # instead of introducing new method, we override the train method
+    # and call the super().train method for individual stages
+    # this way, we can use the same training loop for both stages
+    # we can also use the same early stopping mechanism for both stages
+    def train(self, nsteps):
+        # first, we will train the CG stage
+        # since both stages use the same training loop, we can use the same method
+        # h = self.train(nsteps)
+        # use the parent train method 
+        h = super().train(nsteps)
+        # now check if early stopping was triggered
+        # then, if we were not already in the fine-grained stage, we switch to the fine-grained stage
+        if self.early_stopping_triggered and not self.fine_grained:
+            self.start_fine_graining()
+            # now we train the fine-grained stage
+            # h = self.train(nsteps)
+            h = super().train(nsteps)
+            
+        return h
+    
+    # for backward compatibility, we can also define a train_full method
+    # that calls the train method
+    def train_full(self, nsteps):
+        return self.train(nsteps)
+    
+    
+from warnings import warn
+        
+# deprecate EnergyMinimizerPytorch and replace with EnergyMinimizer
+class EnergyMinimizerPytorch(EnergyMinimizer):
+    # raise deprecation warning but initialize the parent class
+    def __init__(self, energy_func, initial_pos, optimizer_type=None, lr=0.1, clamp_grads=1., 
+                log_step=10, log_pos_step=0, log_dir='../results/logs', patience=5, min_delta=0.0, log_name=None, earlystopping=None):
+        print("EnergyMinimizerPytorch is deprecated. Use EnergyMinimizer instead")
+        warn("EnergyMinimizerPytorch is deprecated. Use EnergyMinimizer instead", DeprecationWarning)
+        super().__init__(energy_func, initial_pos, optimizer_type, lr, clamp_grads, 
+                log_step, log_pos_step, log_dir, patience, min_delta, log_name, earlystopping)
+    
+# deprecate CGMinimizerPytorch and replace with CGMinimizer
+class CGMinimizerPytorch(CGMinimizer):
+    def __init__(self, energy_func, initial_pos, cg_modes, optimizer_type=None, lr=0.1, lr_cg=0.1, clamp_grads=1., 
+                log_step=10, log_pos_step=0, log_dir='../results/logs', 
+                patience=5, min_delta=0.0, cg_patience=5, cg_min_delta=0.0, log_name=None, earlystopping=None):
+        warn("CGMinimizerPytorch is deprecated. Use CGMinimizer instead", DeprecationWarning)
+        super().__init__(energy_func, initial_pos, cg_modes, optimizer_type, lr, lr_cg, clamp_grads, 
+                log_step, log_pos_step, log_dir, patience, min_delta, cg_patience, cg_min_delta, log_name, earlystopping)
+        
+# deprecate GNNMinimizerPytorch and replace with GNNMinimizer
+class GNNMinimizerPytorch(GNNMinimizer):
+    def __init__(self, energy_func, initial_pos, gnn_reparam, optimizer_type=None, lr=0.1, lr_gnn=0.1, clamp_grads=1., 
+                log_step=10, log_pos_step=0, log_dir='../results/logs', 
+                patience=5, min_delta=0.0, gnn_patience=5, gnn_min_delta=0.0, log_name=None, earlystopping=None):
+        warn("GNNMinimizerPytorch is deprecated. Use GNNMinimizer instead", DeprecationWarning)
+        super().__init__(energy_func, initial_pos, gnn_reparam, optimizer_type, lr, lr_gnn, clamp_grads, 
+                log_step, log_pos_step, log_dir, patience, min_delta, gnn_patience, gnn_min_delta, log_name, earlystopping)

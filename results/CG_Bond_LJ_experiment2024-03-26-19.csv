@@ -1,0 +1,2 @@
+energy_function,model_name,energy,time,lr,clamp_grads,patience,min_delta,x0_std
+Energy_LJ_2scale,LJ_loop_n400_d3,0.041664160788059235,10.675312042236328,0.001,0.01,20,1e-06,1.218485951423645
