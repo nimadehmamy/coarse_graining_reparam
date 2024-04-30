@@ -101,6 +101,34 @@ def lj(r, m, n):
 #     # r is the distance matrix
 #     return torch.sparse.mm(C_sparse, r)
     
+#### Base energy class
+
+# we define EnergyModule for converting an arbitrary energy function to the form we need
+# The base model is just a wrapper around the energy function,
+# and defines an update method to update the parameters of the energy function.
+
+class EnergyModule:
+    def __init__(self, energy_func, **energy_kws):
+        """Base class for energy functions.
+        
+        Args:
+            energy_func (callable): Energy function.
+        """
+        self.get_energy = energy_func
+        self.energy_kws = energy_kws
+        
+    def update(self, **kws):
+        """This method is used to update the parameters of the energy function.
+        This may include defining pairs of atoms to compute the energy for, etc.
+        """
+        # self.energy_kws.update(kws)
+        pass 
+        
+    def __call__(self, x):
+        return self.get_energy(x, **self.energy_kws)
+    
+    def __repr__(self):
+        return f'EnergyModule object with energy function {self.energy_func.__name__}'
 
 #### Energy class 
 
@@ -121,8 +149,10 @@ def lj(r, m, n):
 # can keep track of its parameters and indices in the same place.
 
 
+
 class Energy:
-    def __init__(self, A_list, energy_func_list, device='auto', num_neg_pairs='auto', thres_A=1e-4,log_name='Energy' ,**kws):
+    def __init__(self, A_list, energy_func_list, device='auto', num_neg_pairs='auto', thres_A=1e-4,
+                log_name='Energy' ,**kws):
         """Class to compute the energy of a particle system using a list of coupling matrices and energy functions.
         The energy is computed as the sum of the energies of the energy functions,
         each weighted by the coupling matrices.
@@ -195,11 +225,17 @@ class Energy:
         # keep all negative pairs for updating random pairs
         self.indices_neg_all = idx_inv
         
+    def update(self):
+        # update the coupling matrices
+        # and the negative pairs
+        self.update_neg_pairs()
+        
     def update_neg_pairs(self):
         # choose num_neg_pairs random negative pairs from idx_inv randomly
         i = torch.randperm(self.indices_neg_all.shape[1])[:self.num_neg_pairs]
         self.indices_neg = (self.indices_neg_all[0][i], self.indices_neg_all[1][i])
         # self.indices_neg = (idx_inv[0][:self.num_neg_pairs], idx_inv[1][:self.num_neg_pairs])
+        
         
     def get_energy(self, x):
         # for each A and energy function, compute the energy

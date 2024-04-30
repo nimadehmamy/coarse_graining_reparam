@@ -17,7 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 # sys.path.append('..')
 
 from ..earlystopping import EarlyStopping
-        
+
 # We should move the early stopping functionality into its own class
 
 # Can we define the energy minimizer a bit more generally?
@@ -153,7 +153,8 @@ class EnergyLogger:
 
 class EnergyMinimizer(torch.nn.Module):
     def __init__(self, energy_func, initial_pos, optimizer_type=None, lr=0.1, clamp_grads=1., 
-                log_step=10, log_pos_step=0, log_dir='../results/logs', patience=5, min_delta=0.0, log_name=None, earlystopping=None):
+                log_step=10, log_pos_step=0, log_dir='../results/logs', patience=5, min_delta=0.0, 
+                log_name=None, earlystopping=None):
         """This is a class to minimize the energy of a configuration using PyTorch.
         It uses the energy function to compute the energy of the configuration.
 
@@ -187,8 +188,8 @@ class EnergyMinimizer(torch.nn.Module):
         self.history = self.logger.history
         # save hyperparameters
         self.logger.writer.add_hparams({'lr': self.lr, 'clamp_grads': self.clamp_grads, 
-                                        # 'log_step': self.logger._log_step, 'log_pos_step': self.logger._log_pos_step, 
-                                        'patience': self.early_stop.patience, 'min_delta': self.early_stop.min_delta}, {})
+                    # 'log_step': self.logger._log_step, 'log_pos_step': self.logger._log_pos_step, 
+                    'patience': self.early_stop.patience, 'min_delta': self.early_stop.min_delta}, {})
         self.log_name = self.logger.log_name
         
     # define patience as a property which also updates the early stopping object
@@ -257,7 +258,7 @@ class EnergyMinimizer(torch.nn.Module):
     def train(self, nsteps, update_pairs=True):
         self.logger.start_log_epoch()
         if update_pairs:
-            self.energy_func.update_neg_pairs()
+            self.energy_func.update()
             # updating pairs causes the energy to jump, so we need to reset the early stopping
             self.early_stop.reset()
         
@@ -290,7 +291,8 @@ class EnergyMinimizer(torch.nn.Module):
 class EnergyMinimizerPytorch(EnergyMinimizer):
     # raise deprecation warning but initialize the parent class
     def __init__(self, energy_func, initial_pos, optimizer_type=None, lr=0.1, clamp_grads=1., 
-                log_step=10, log_pos_step=0, log_dir='../results/logs', patience=5, min_delta=0.0, log_name=None, earlystopping=None):
+                log_step=10, log_pos_step=0, log_dir='../results/logs', patience=5, min_delta=0.0, 
+                log_name=None, earlystopping=None):
         print("EnergyMinimizerPytorch is deprecated. Use EnergyMinimizer instead")
         super().__init__(energy_func, initial_pos, optimizer_type, lr, clamp_grads, 
                 log_step, log_pos_step, log_dir, patience, min_delta, log_name, earlystopping)
@@ -311,10 +313,14 @@ class EnergyMinimizerPytorch(EnergyMinimizer):
 
 class CGMinimizer(EnergyMinimizer):
     def __init__(self, energy_func, initial_pos, cg_modes, optimizer_type=None, lr=0.1, lr_cg=0.1, clamp_grads=1., 
-                log_step=10, log_pos_step=0, log_dir='../results/logs', 
-                patience=5, min_delta=0.0, cg_patience=5, cg_min_delta=0.0, log_name=None, earlystopping=None):
-        super().__init__(energy_func, initial_pos, optimizer_type, lr, clamp_grads, 
-                log_step, log_pos_step, log_dir, patience, min_delta, log_name, earlystopping)
+                log_step=10, log_pos_step=0, log_dir='../results/logs', log_name=None,
+                patience=5, min_delta=0.0, cg_patience=5, cg_min_delta=0.0, earlystopping=None):
+        super().__init__(energy_func=energy_func, initial_pos=initial_pos, 
+            optimizer_type=optimizer_type, lr=lr, clamp_grads=clamp_grads, 
+            log_step=log_step, log_pos_step=log_pos_step, log_dir=log_dir, log_name=log_name, 
+            patience=patience, min_delta=min_delta, earlystopping=earlystopping)
+        # super().__init__(energy_func, initial_pos, optimizer_type, lr, clamp_grads, 
+        #         log_step, log_pos_step, log_dir, patience, min_delta, log_name, earlystopping)
         self.cg_modes = cg_modes
         self.lr_cg = lr_cg
         self.initialize_cg_params(initial_pos)
@@ -432,10 +438,12 @@ class CGMinimizer(EnergyMinimizer):
 # class GNNMinimizer(EnergyMinimizerPytorch):#
 class GNNMinimizer(EnergyMinimizer):
     def __init__(self, energy_func, initial_pos, gnn_reparam, optimizer_type=None, lr=0.1, lr_gnn=0.1, clamp_grads=1., 
-                log_step=10, log_pos_step=0, log_dir='../results/logs', 
-                patience=5, min_delta=0.0, gnn_patience=5, gnn_min_delta=0.0, log_name=None, earlystopping=None):
-        super().__init__(energy_func, initial_pos, optimizer_type, lr, clamp_grads, 
-                log_step, log_pos_step, log_dir, patience, min_delta, log_name, earlystopping)
+                log_step=10, log_pos_step=0, log_dir='../results/logs',  log_name=None,
+                patience=5, min_delta=0.0, gnn_patience=5, gnn_min_delta=0.0, earlystopping=None):
+        super().__init__(energy_func=energy_func, initial_pos=initial_pos, 
+            optimizer_type=optimizer_type, lr=lr, clamp_grads=clamp_grads, 
+            log_step=log_step, log_pos_step=log_pos_step, log_dir=log_dir, log_name=log_name, 
+            patience=patience, min_delta=min_delta, earlystopping=earlystopping)
         self.gnn = gnn_reparam
         self.lr_gnn = lr_gnn
         self.optimizer_gnn = self.get_optimizer(self.gnn.parameters(), lr=self.lr_gnn)
@@ -524,11 +532,15 @@ from warnings import warn
 class EnergyMinimizerPytorch(EnergyMinimizer):
     # raise deprecation warning but initialize the parent class
     def __init__(self, energy_func, initial_pos, optimizer_type=None, lr=0.1, clamp_grads=1., 
-                log_step=10, log_pos_step=0, log_dir='../results/logs', patience=5, min_delta=0.0, log_name=None, earlystopping=None):
+                log_step=10, log_pos_step=0, log_dir='../results/logs', 
+                patience=5, min_delta=0.0, 
+                log_name=None, earlystopping=None):
         print("EnergyMinimizerPytorch is deprecated. Use EnergyMinimizer instead")
         warn("EnergyMinimizerPytorch is deprecated. Use EnergyMinimizer instead", DeprecationWarning)
-        super().__init__(energy_func, initial_pos, optimizer_type, lr, clamp_grads, 
-                log_step, log_pos_step, log_dir, patience, min_delta, log_name, earlystopping)
+        super().__init__(energy_func=energy_func, initial_pos=initial_pos, 
+            optimizer_type=optimizer_type, lr=lr, clamp_grads=clamp_grads, 
+            log_step=log_step, log_pos_step=log_pos_step, log_dir=log_dir, log_name=log_name, 
+            patience=patience, min_delta=min_delta, earlystopping=earlystopping)
     
 # deprecate CGMinimizerPytorch and replace with CGMinimizer
 class CGMinimizerPytorch(CGMinimizer):
@@ -536,14 +548,21 @@ class CGMinimizerPytorch(CGMinimizer):
                 log_step=10, log_pos_step=0, log_dir='../results/logs', 
                 patience=5, min_delta=0.0, cg_patience=5, cg_min_delta=0.0, log_name=None, earlystopping=None):
         warn("CGMinimizerPytorch is deprecated. Use CGMinimizer instead", DeprecationWarning)
-        super().__init__(energy_func, initial_pos, cg_modes, optimizer_type, lr, lr_cg, clamp_grads, 
-                log_step, log_pos_step, log_dir, patience, min_delta, cg_patience, cg_min_delta, log_name, earlystopping)
+        
+        super().__init__(energy_func=energy_func, initial_pos=initial_pos, cg_modes=cg_modes,
+            optimizer_type=optimizer_type, lr=lr, lr_cg=lr_cg, clamp_grads=clamp_grads, 
+            log_step=log_step, log_pos_step=log_pos_step, log_dir=log_dir,  log_name=log_name, 
+            patience=patience, min_delta=min_delta, cg_patience=cg_patience, 
+            cg_min_delta=cg_min_delta, earlystopping=earlystopping)
         
 # deprecate GNNMinimizerPytorch and replace with GNNMinimizer
 class GNNMinimizerPytorch(GNNMinimizer):
     def __init__(self, energy_func, initial_pos, gnn_reparam, optimizer_type=None, lr=0.1, lr_gnn=0.1, clamp_grads=1., 
-                log_step=10, log_pos_step=0, log_dir='../results/logs', 
-                patience=5, min_delta=0.0, gnn_patience=5, gnn_min_delta=0.0, log_name=None, earlystopping=None):
-        warn("GNNMinimizerPytorch is deprecated. Use GNNMinimizer instead", DeprecationWarning)
-        super().__init__(energy_func, initial_pos, gnn_reparam, optimizer_type, lr, lr_gnn, clamp_grads, 
-                log_step, log_pos_step, log_dir, patience, min_delta, gnn_patience, gnn_min_delta, log_name, earlystopping)
+        log_step=10, log_pos_step=0, log_dir='../results/logs', 
+        patience=5, min_delta=0.0, gnn_patience=5, gnn_min_delta=0.0, log_name=None, earlystopping=None):
+        warn("GNNMinimizerPytorch is deprecated. Use GNNMinimizer instead", DeprecationWarning)    
+        super().__init__(energy_func=energy_func, initial_pos=initial_pos, gnn_reparam=gnn_reparam, 
+            optimizer_type=optimizer_type, lr=lr, lr_gnn=lr_gnn, clamp_grads=clamp_grads, 
+            log_step=log_step, log_pos_step=log_pos_step, log_dir=log_dir, log_name=log_name, 
+            patience=patience, min_delta=min_delta, 
+            gnn_patience=gnn_patience, gnn_min_delta=gnn_min_delta, earlystopping=earlystopping)

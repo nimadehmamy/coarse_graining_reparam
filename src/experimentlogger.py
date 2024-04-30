@@ -75,7 +75,7 @@ class ExperimentLogger:
         for i in range(epochs):
             # train the model
             # em.early_stopping_triggered = False
-            model.energy_func.update_neg_pairs()
+            model.energy_func.update()
             h = model.train(steps)
             print(len(h['energy']), f"{h['energy'][-1]:.3g}, {np.sum(h['time']):.2f}")
             # log interim result
