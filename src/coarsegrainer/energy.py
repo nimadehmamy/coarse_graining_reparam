@@ -108,15 +108,24 @@ def lj(r, m, n):
 # and defines an update method to update the parameters of the energy function.
 
 class EnergyModule:
-    def __init__(self, energy_func, **energy_kws):
+    def __init__(self, **energy_kws):
         """Base class for energy functions.
         
         Args:
             energy_func (callable): Energy function.
         """
-        self.get_energy = energy_func
+        # self.energy = energy_func
         self.energy_kws = energy_kws
         
+    def energy(self, x, **kws):
+        """Energy function.
+        
+        Args:
+            x (torch.Tensor): Input tensor.
+            kws: Keyword arguments for the energy function.
+        """
+        pass 
+    
     def update(self, **kws):
         """This method is used to update the parameters of the energy function.
         This may include defining pairs of atoms to compute the energy for, etc.
@@ -124,8 +133,8 @@ class EnergyModule:
         # self.energy_kws.update(kws)
         pass 
         
-    def __call__(self, x):
-        return self.get_energy(x, **self.energy_kws)
+    def __call__(self, x, **kws):
+        return self.energy(x, **kws)
     
     def __repr__(self):
         return f'EnergyModule object with energy function {self.energy_func.__name__}'
