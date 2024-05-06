@@ -55,7 +55,9 @@ class GCN(torch.nn.Module):
         # if it is not weighted, we assume the weights are all 1
         # when weighted, the third column should be the weight  
         # 1. convert to tensor
-        edgelist = torch.tensor(edgelist)
+        # check if it's not a tensor
+        if not isinstance(edgelist, torch.Tensor):
+            edgelist = torch.tensor(edgelist)
         # 2. get the number of nodes from the first two columns (make sure it's int)
         n = edgelist[:, :2].max().int() + 1
         # 3. get weights if available
@@ -64,7 +66,7 @@ class GCN(torch.nn.Module):
         else:
             weights = torch.ones(edgelist.shape[0])
         # 4. create the sparse adjacency matrix
-        self.A = torch.sparse_coo_tensor(edgelist.T, weights, (n, n))
+        self.A = torch.sparse_coo_tensor(edgelist[:,:2].T, weights, (n, n))
 
     def reset_parameters(self):
         # initialize the weights using xavier initialization
@@ -265,9 +267,12 @@ class GNNRes(torch.nn.Module):
         return x        
     
 # Next, we implement the graph neural network (GNN) using the GCN layer
+# we want GNN to be able to handle both GCN and GCN_CG layers
+# if cg is given, we will use GCN_CG, otherwise we will use GCN
+# it should also be able to take A and edgelist as inputs
 
 class GNN(torch.nn.Module):
-    def __init__(self, hidden_dims, cg, num_cg, bias=True, activation=torch.nn.ReLU(), GCN_class=GCN_CG):
+    def __init__(self, hidden_dims, A=None, edgelist=None, cg=None, num_cg=None, bias=True, activation=torch.nn.ReLU(),residual=False): 
         """This is a class to implement the graph neural network using the GCN layer.
         It will also have a final linear layer to project the output to the desired dimension.
 
@@ -276,34 +281,70 @@ class GNN(torch.nn.Module):
                 The first element is the input dimension and 
                 the last element is the output dimension. 
                 It should have at least two elements.
+            A (torch.Tensor, optional): The adjacency matrix. Defaults to None.
+            edgelist (torch.Tensor, optional): The edge list. Defaults to None.
             cg (object): The object containing the cg_modes and cg_eigenvalues.
             num_cg (int): The number of cg_modes to use.
             bias (bool, optional): Whether to include a bias term. 
                 Defaults to True.
             activation (torch.nn.Module, optional): The activation function. 
                 Defaults to torch.nn.ReLU().
+            residual (bool, optional): Whether to use residual connections.
+                This is a special residual, where we concatenate the input to the output of each layer. 
+                The final layer then takes all the concatenated outputs as input and 
+                reduces it to the output dimension. Defaults to False.
         """
         super().__init__()
         self.hidden_dims = hidden_dims
         self.num_layers = len(hidden_dims) - 1
-        self.num_cg = num_cg
-        self.layers = torch.nn.ModuleList()
-        for i in range(self.num_layers - 1):
-            self.layers.append(GCN_class(hidden_dims[i], hidden_dims[i+1], cg, num_cg, bias))
+        # assert that at least one of cg, A and edgelist is given
+        if cg is None and A is None and edgelist is None:
+            raise ValueError("At least one of cg, A and edgelist should be given.")
+        
+        # if cg is given, use GCN_CG with cg and num_cg as inputs
+        # otherwise, use GCN with A and edgelist as inputs
+        if cg is not None:
+            self.layers = torch.nn.ModuleList([GCN_CG(hidden_dims[i], hidden_dims[i+1], cg, num_cg, bias) 
+                        for i in range(self.num_layers - 1)])
+        else:
+            self.layers = torch.nn.ModuleList([GCN(hidden_dims[i], hidden_dims[i+1], A, edgelist, bias) 
+                        for i in range(self.num_layers - 1)])
+        # self.layers = torch.nn.ModuleList()
+        # for i in range(self.num_layers - 1):
+        #     self.layers.append(GCN_class(hidden_dims[i], hidden_dims[i+1], cg, num_cg, bias))
+        
         # the final layer is a linear layer
-        self.layers.append(torch.nn.Linear(hidden_dims[-2], hidden_dims[-1]))
+        self.residual = residual
+        if residual:
+            # the last layer will take all the concatenated outputs as input
+            self.layers.append(torch.nn.Linear(sum(hidden_dims[0:-1]), hidden_dims[-1]))
+        else:
+            self.layers.append(torch.nn.Linear(hidden_dims[-2], hidden_dims[-1]))
         self.act = activation
         
     def forward(self, x):
         # compute the graph neural network
         # assume x is of shape (n, in_features)
-        for i in range(self.num_layers - 1):
-            x = self.layers[i](x)
-            # apply the activation
-            x = self.act(x)
+        if self.residual:
+            # keep the outputs of all layers
+            outputs = []
+            for i in range(self.num_layers - 1):
+                x = self.layers[i](x)
+                # apply the activation
+                x = self.act(x)
+                # keep the output
+                outputs.append(x)
+            # concatenate the outputs
+            x = torch.cat(outputs, dim=1)
+        else:
+            for i in range(self.num_layers - 1):
+                x = self.layers[i](x)
+                # apply the activation
+                x = self.act(x)
         # apply the final layer
         x = self.layers[-1](x)
         return x
+
 
 # GNN reparemeterization:
 # we will use the GNN to reparameterize the x variables
@@ -313,10 +354,12 @@ class GNN(torch.nn.Module):
 
 
 class GNNReparam(torch.nn.Module):
-    def __init__(self, hidden_dims, cg, num_cg, latent_sigma='auto', 
-                bias=True, activation=torch.nn.ReLU(), GNN_class=GNN, GCN_class=GCN_CG, output_init_sigma=1.0):
+    def __init__(self, hidden_dims, cg=None, A=None, edgelist=None, num_cg=None, latent_sigma='auto', 
+                bias=True, activation=torch.nn.ReLU(), output_init_sigma=1.0, device='cpu'):
         """This is a class to implement the graph neural network reparameterization.
-        
+        The GNN will use the GCN layer to perform the graph convolution.
+        It will take a set of hidden dimensions, including the input and output dimensions.
+        The GNN will also choose whether to use the GCN or GCN_CG layer based on the inputs.
 
         Args:
             hidden_dims (list): The list of hidden dimensions. 
@@ -324,6 +367,11 @@ class GNNReparam(torch.nn.Module):
                 the last element is the output dimension. 
                 It should have at least two elements.
             cg (object): The object containing the cg_modes and cg_eigenvalues.
+            A (torch.Tensor, optional): The adjacency matrix. Defaults to None. 
+                If given, edgelist is ignored.
+            edgelist (torch.Tensor, optional): The edge list. Defaults to None.
+                The edgelist is used to construct the a sparse adjacency matrix.
+                If both or none of A and edgelist are given, an error is raised.
             num_cg (int): The number of cg_modes to use.
             initial_pos (torch.Tensor): The initial position of the particles.
             bias (bool, optional): Whether to include a bias term. 
@@ -333,13 +381,23 @@ class GNNReparam(torch.nn.Module):
         """
         super().__init__()
         self.hidden_dims = hidden_dims
-        self.num_cg = num_cg
-        self.gnn = GNN_class(hidden_dims, cg, num_cg, bias, activation, GCN_class)
-        self.n = cg.cg_modes.shape[0]
+        self.gnn = GNN(hidden_dims, A, edgelist, cg, num_cg, bias, activation)
+        # we need the number of nodes to initialize the latent embedding
+        # we can infer this from the cg_modes or A or edgelist
+        self.get_num_nodes(cg, A, edgelist)
         self.get_latent_embedding(latent_sigma)
         # in order to be able to rescale, we first need to make sure all weights are n the same device
-        self.to(cg.cg_modes.device)
+        # self.to(self.gnn.layers[0].weight.device)
+        self.to(device)
         self.rescale_output(output_init_sigma)
+    
+    def get_num_nodes(self, cg, A, edgelist):
+        if cg is not None:
+            self.n = cg.cg_modes.shape[0]
+        elif A is not None:
+            self.n = A.shape[0]
+        else:
+            self.n = edgelist.max().int() + 1
         
     def get_latent_embedding(self, latent_sigma):
         # get the latent embedding
