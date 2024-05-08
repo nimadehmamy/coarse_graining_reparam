@@ -272,7 +272,8 @@ class GNNRes(torch.nn.Module):
 # it should also be able to take A and edgelist as inputs
 
 class GNN(torch.nn.Module):
-    def __init__(self, hidden_dims, A=None, edgelist=None, cg=None, num_cg=None, bias=True, activation=torch.nn.ReLU(),residual=False): 
+    def __init__(self, hidden_dims, A=None, edgelist=None, cg=None, num_cg=None, bias=True,
+                activation=torch.nn.ReLU(), residual=False): 
         """This is a class to implement the graph neural network using the GCN layer.
         It will also have a final linear layer to project the output to the desired dimension.
 
@@ -327,7 +328,7 @@ class GNN(torch.nn.Module):
         # assume x is of shape (n, in_features)
         if self.residual:
             # keep the outputs of all layers
-            outputs = []
+            outputs = [x]
             for i in range(self.num_layers - 1):
                 x = self.layers[i](x)
                 # apply the activation
@@ -355,7 +356,8 @@ class GNN(torch.nn.Module):
 
 class GNNReparam(torch.nn.Module):
     def __init__(self, hidden_dims, cg=None, A=None, edgelist=None, num_cg=None, latent_sigma='auto', 
-                bias=True, activation=torch.nn.ReLU(), output_init_sigma=1.0, device='cpu'):
+                bias=True, activation=torch.nn.ReLU(), output_init_sigma=1.0,
+                residual=False, device='cpu'):
         """This is a class to implement the graph neural network reparameterization.
         The GNN will use the GCN layer to perform the graph convolution.
         It will take a set of hidden dimensions, including the input and output dimensions.
@@ -381,7 +383,14 @@ class GNNReparam(torch.nn.Module):
         """
         super().__init__()
         self.hidden_dims = hidden_dims
-        self.gnn = GNN(hidden_dims, A, edgelist, cg, num_cg, bias, activation)
+        self.gnn = GNN(hidden_dims=hidden_dims,
+                A=A,
+                edgelist=edgelist,
+                cg=cg,
+                num_cg=num_cg,
+                bias=bias,
+                activation=activation,
+                residual=residual)
         # we need the number of nodes to initialize the latent embedding
         # we can infer this from the cg_modes or A or edgelist
         self.get_num_nodes(cg, A, edgelist)

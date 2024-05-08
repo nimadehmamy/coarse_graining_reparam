@@ -213,8 +213,8 @@ class CGMinimizer(EnergyMinimizer):
         self.initialize_cg_params(initial_pos)
         # self.get_cg_optimizer()
         self.cg_optimizer = self.get_optimizer([self.z], lr=self.lr_cg)
-        # store the original optimizer as the fg_optimizer
-        self.fg_optimizer = self.optimizer
+        # store the original optimizer as the optimizer_fg
+        self.optimizer_fg = self.optimizer
         # choose the cg optimizer as the optimizer
         self.optimizer = self.cg_optimizer
         self.init_CG_hyperparameters(cg_patience, cg_min_delta, patience, min_delta)
@@ -269,8 +269,8 @@ class CGMinimizer(EnergyMinimizer):
         
         # reset the state of the fine-grained optimizer
         self.optimizer = getattr(torch.optim, self.optimizer_type)([self.x], lr = self.lr)
-        self.fg_optimizer = self.optimizer
-        # self.optimizer = self.fg_optimizer
+        self.optimizer_fg = self.optimizer
+        # self.optimizer = self.optimizer_fg
         self.cg_steps = len(self.history['time'])
         # change the patience and min_delta to the fine-grained values
         self.patience = self.fg_patience
@@ -329,7 +329,7 @@ class GNNMinimizer(EnergyMinimizer):
         self.gnn = gnn_reparam
         self.lr_gnn = lr_gnn
         self.optimizer_gnn = self.get_optimizer(self.gnn.parameters(), lr=self.lr_gnn)
-        self.fg_optimizer = self.optimizer
+        self.optimizer_fg = self.optimizer
         self.optimizer = self.optimizer_gnn
         self.init_GNN_hyperparameters(gnn_patience, gnn_min_delta, patience, min_delta)
         self.fine_grained = False
@@ -371,7 +371,7 @@ class GNNMinimizer(EnergyMinimizer):
         
         # reset the state of the fine-grained optimizer
         self.optimizer = getattr(torch.optim, self.optimizer_type)([self.x], lr = self.lr)
-        self.fg_optimizer = self.optimizer
+        self.optimizer_fg = self.optimizer
         self.gnn_steps = len(self.history['time'])
         # change the patience and min_delta to the fine-grained values
         self.patience = self.fg_patience

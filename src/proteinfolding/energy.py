@@ -113,6 +113,8 @@ class EnergyProtein(EnergyModule):
 
         # Calculate the sign of the angle
         sign = torch.sign((vector2 * cross).norm(dim=-1))
+        # Calculate the sign of the angle
+        # sign = torch.sign(torch.sum(vector2 * cross, dim=-1))
 
         # Calculate the angle
         angle = sign * torch.arctan2((cross).norm(dim = -1), dot)
