@@ -59,10 +59,15 @@ class EnergyProtein(EnergyModule):
         self.LJ_sigma = (sigma[None] + sigma[:,None])/2
         self.LJ_epsilon = torch.sqrt(epsilon[None]* epsilon[:,None])
         self.charge2 = charge[None] * charge[:,None]
+        # to avoid self-interaction and double counting, remove the diagonal elements
+        I = torch.eye(charge.shape[0], dtype = torch.bool).to(self.device)
+        # self.LJ_sigma = self.LJ_sigma.masked_fill(I, 0)        
+        self.LJ_epsilon = self.LJ_epsilon.masked_fill(I, 0)
+        self.charge2 = self.charge2.masked_fill(I, 0)
         # to avoid self-interaction and double counting, only use the upper triangle
         # self.LJ_sigma = torch.triu(self.LJ_sigma, diagonal = 1)
-        self.LJ_epsilon = torch.triu(self.LJ_epsilon, diagonal = 1)
-        self.charge2 = torch.triu(self.charge2, diagonal = 1)
+        # self.LJ_epsilon = torch.triu(self.LJ_epsilon, diagonal = 1)
+        # self.charge2 = torch.triu(self.charge2, diagonal = 1)
         
 
     def harmonic_bond_energy(self, x,):
@@ -92,7 +97,7 @@ class EnergyProtein(EnergyModule):
         return energy_angle
 
 
-    def torsion_angle_energy(self, x):
+    def torsion_angle_energy_old(self, x):
         ids = self.torsion_data['ids']
         n = self.torsion_data['n']
         t = self.torsion_data['t']
@@ -129,7 +134,7 @@ class EnergyProtein(EnergyModule):
         
         return energy_angle
 
-    def torsion_angle_energy2(self, x):
+    def torsion_angle_energy(self, x):
         """ Compute energy of torsion angles. 
         The formula for torsion angle energy is:
         E = k * (1 + cos(n * angle - t))
