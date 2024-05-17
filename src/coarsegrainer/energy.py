@@ -137,7 +137,7 @@ class EnergyModule:
         return self.energy(x, **kws)
     
     def __repr__(self):
-        return f'EnergyModule object with energy function {self.energy_func.__name__}'
+        return f'EnergyModule object with energy function {self.energy.__name__}'
 
 #### Energy class 
 
