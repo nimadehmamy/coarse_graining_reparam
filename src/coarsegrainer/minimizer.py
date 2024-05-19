@@ -444,3 +444,22 @@ class GNNMinimizerPytorch(GNNMinimizer):
             gnn_patience=gnn_patience, gnn_min_delta=gnn_min_delta, earlystopping=earlystopping)
 
 
+from torch.optim.lr_scheduler import ExponentialLR
+
+class AnnealingLR(ExponentialLR):
+    def __init__(self, optimizer, lr_min, lr_max, epochs, last_epoch=-1):
+        self.epochs = epochs
+        self.epoch_counter = 0 # we use this to know when to stop decaying the LR
+        self.get_decay_rate(lr_min, lr_max, epochs)
+        super(AnnealingLR, self).__init__(optimizer, self.gamma, last_epoch)
+    
+    def get_decay_rate(self, lr_min, lr_max, epochs):
+        self.gamma = (lr_min/lr_max)**(1/epochs)
+    
+    # we can redefine step to change the learning rate only before "epochs" epochs
+    def step(self):
+        if self.epoch_counter < self.epochs:
+            self.epoch_counter += 1
+            super(AnnealingLR, self).step()
+        else:
+            pass

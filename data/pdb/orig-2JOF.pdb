@@ -1,4 +1,4 @@
-REMARK   1 CREATED WITH OPENMM 8.1.1, 2024-05-16
+REMARK   1 CREATED WITH OPENMM 8.1.1, 2024-05-18
 CRYST1    1.000    1.000    1.000  90.00  90.00  90.00 P 1           1 
 ATOM      1  N   ASP A   1      21.464   6.593  -4.077  1.00  0.00           N  
 ATOM      2  CA  ASP A   1      22.746   6.821  -3.378  1.00  0.00           C  

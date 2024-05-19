@@ -23,6 +23,12 @@ def get_file_text(name):
         s = f.readlines()
     return ''.join(s)
 
+import py3Dmol
+
+def pdb_3d_view(pdb_file, width=400, height=300):
+    p_ = py3Dmol.view(data=get_file_text(pdb_file),width=width, height=height)
+    p_.setStyle({'cartoon': {'color':'spectrum'}}); #'stick', 'cartoon'
+    return p_
 
 class Protein:
     def __init__(self, pdb_file):
