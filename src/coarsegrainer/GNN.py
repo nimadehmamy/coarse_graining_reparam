@@ -360,7 +360,7 @@ class GNN(torch.nn.Module):
 class GNNReparam(torch.nn.Module):
     def __init__(self, hidden_dims, cg=None, A=None, edgelist=None, num_cg=None, 
                 latent_sigma='auto', initial_pos=None,
-                bias=True, activation=torch.nn.ReLU(), output_init_sigma=1.0,
+                bias=True, activation=torch.nn.ReLU(), output_init_sigma=1.0, node_attributes=None,
                 residual=False, device='cpu'):
         """This is a class to implement the graph neural network reparameterization.
         The GNN will use the GCN layer to perform the graph convolution.
@@ -384,6 +384,12 @@ class GNNReparam(torch.nn.Module):
                 Defaults to True.
             activation (torch.nn.Module, optional): The activation function. 
                 Defaults to torch.nn.ReLU().
+            output_init_sigma (float, optional): The initial sigma for the output.
+                Defaults to 1.0.
+            node_attributes (torch.Tensor, optional): The node attributes.
+                These are the features of the nodes and will be concatenated with the latent embedding.
+                They will remain fixed during the reparameterization. 
+                Defaults to None.
         """
         super().__init__()
         self.hidden_dims = hidden_dims
@@ -398,6 +404,8 @@ class GNNReparam(torch.nn.Module):
         # we need the number of nodes to initialize the latent embedding
         # we can infer this from the cg_modes or A or edgelist
         self.get_num_nodes(cg, A, edgelist)
+        # convert node attribs to torch tensor
+        self.node_attributes = torch.tensor(node_attributes, dtype=torch.float32) if node_attributes is not None else None
         self.get_latent_embedding(latent_sigma)
         # in order to be able to rescale, we first need to make sure all weights are n the same device
         # self.to(self.gnn.layers[0].weight.device)
@@ -420,13 +428,27 @@ class GNNReparam(torch.nn.Module):
             self.n = edgelist.max().int() + 1
         
     def get_latent_embedding(self, latent_sigma):
+        """The latent embedding is the initial position of the particles. 
+        The latent embedding is a learnable parameter of the model.
+        The number of latent dimensions is the first hidden dimension of the GNN, 
+        minus the number of node attributes.
+
+        Args:
+            latent_sigma (_type_): _description_
+        """
         # get the latent embedding
         if latent_sigma == 'auto':
             latent_sigma = 1/np.sqrt(self.hidden_dims[0])
             # we use the std of the initial position to scale the initial position
             # self.latent_embedding = torch.nn.Parameter(self.gnn(self.initial_pos).std() * torch.randn(self.n, self.gnn.hidden_dims[0]))
         # we use the latent_sigma to scale the initial position
-        self.latent_embedding = torch.nn.Parameter(latent_sigma * torch.randn(self.n, self.gnn.hidden_dims[0]))
+        # we also add the node attributes to the latent embedding, but we don't learn them
+        if self.node_attributes is not None:
+            self.latent_embedding = torch.nn.Parameter(latent_sigma * torch.randn(self.n, self.gnn.hidden_dims[0] - self.node_attributes.shape[1]))
+            self.latent_embedding = torch.cat([self.latent_embedding, self.node_attributes ], dim=1)
+        else:        
+            self.latent_embedding = torch.nn.Parameter(latent_sigma * torch.randn(self.n, self.gnn.hidden_dims[0]))
+        
         
         
     def rescale_output(self, output_init_sigma):
@@ -463,5 +485,6 @@ class GNNReparam(torch.nn.Module):
                 print(f'Fitting output: Step {i}, loss: {loss.item():.6g}, time: {history["time"][-1]:.2f} s, pat:{early_stop.patience_counter},',end='\r')
 
             if early_stop(loss.item()):
+                print(f'\nFinished fitting output: Step {i}, loss: {loss.item():.6g}, time: {history["time"][-1]:.2f} s, pat:{early_stop.patience_counter},')
                 break
         return output, history
