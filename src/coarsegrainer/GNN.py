@@ -1,7 +1,10 @@
+import time
 
 import torch
 import numpy as np
 
+
+from .earlystopping import EarlyStopping
 
 # we will implement an efficient graph neural network using pytorch
 # this will be used to reparameterize the x variables
@@ -355,7 +358,8 @@ class GNN(torch.nn.Module):
 
 
 class GNNReparam(torch.nn.Module):
-    def __init__(self, hidden_dims, cg=None, A=None, edgelist=None, num_cg=None, latent_sigma='auto', 
+    def __init__(self, hidden_dims, cg=None, A=None, edgelist=None, num_cg=None, 
+                latent_sigma='auto', initial_pos=None,
                 bias=True, activation=torch.nn.ReLU(), output_init_sigma=1.0,
                 residual=False, device='cpu'):
         """This is a class to implement the graph neural network reparameterization.
@@ -399,6 +403,13 @@ class GNNReparam(torch.nn.Module):
         # self.to(self.gnn.layers[0].weight.device)
         self.to(device)
         self.rescale_output(output_init_sigma)
+        # we fit the output to the initial position, if given
+        if initial_pos is not None:
+            self.initial_pos = initial_pos.to(device)
+            x,self._fit_history = self.fit_output(self.initial_pos)
+        else:
+            self.initial_pos = None
+            self._fit_history = None
     
     def get_num_nodes(self, cg, A, edgelist):
         if cg is not None:
@@ -428,3 +439,29 @@ class GNNReparam(torch.nn.Module):
         # compute the reparameterized x
         # assume x is of shape (n, in_features)
         return self.gnn(self.latent_embedding)
+    
+    # to fit the output positions to a given initial position, we use GD on MSE loss
+    def fit_output(self, output_pos, lr=1e-3, n_steps=1000, patience=20, min_delta=1e-6):
+        # fit the output to the given output_pos
+        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        early_stop = EarlyStopping(patience=patience, min_delta=min_delta)
+        
+        history = {'loss':[], 'time':[]}
+        loss_fn = torch.nn.MSELoss()
+        start = time.time()
+        for i in range(n_steps):
+            optimizer.zero_grad()
+            output = self()
+            loss = loss_fn(output, output_pos)
+            loss.backward()
+            optimizer.step()
+            
+            history['loss'].append(loss.item())
+            history['time'].append(time.time()-start)
+            if i % 100 == 0:
+                # print(f"Fitting output: Step {i}, Loss: {loss.item()}", end='\r')
+                print(f'Fitting output: Step {i}, loss: {loss.item():.6g}, time: {history["time"][-1]:.2f} s, pat:{early_stop.patience_counter},',end='\r')
+
+            if early_stop(loss.item()):
+                break
+        return output, history

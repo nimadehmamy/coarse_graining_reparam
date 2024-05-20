@@ -24,3 +24,6 @@ class EarlyStopping:
             self.early_stopping_triggered = True
             # print("Early stopping")
             
+    def __call__(self, energy):
+        self.check_early_stopping(energy)
+        return self.early_stopping_triggered
