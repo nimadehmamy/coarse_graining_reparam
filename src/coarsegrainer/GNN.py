@@ -356,7 +356,6 @@ class GNN(torch.nn.Module):
 # this class includes both the GNN and the initial position as parameters
 # it will take the same inputs as the GNN class and return the reparameterized x
 
-
 class GNNReparam(torch.nn.Module):
     def __init__(self, hidden_dims, cg=None, A=None, edgelist=None, num_cg=None, 
                 latent_sigma='auto', initial_pos=None,
@@ -410,7 +409,9 @@ class GNNReparam(torch.nn.Module):
         # in order to be able to rescale, we first need to make sure all weights are n the same device
         # self.to(self.gnn.layers[0].weight.device)
         self.to(device)
-        self.rescale_output(output_init_sigma)
+        # self.node_attributes = self.node_attributes.to(device) if self.node_attributes is not None else None
+        self.latent_embedding = self.latent_embedding.to(device)
+        # self.rescale_output(output_init_sigma)
         # we fit the output to the initial position, if given
         if initial_pos is not None:
             self.initial_pos = initial_pos.to(device)
@@ -418,7 +419,7 @@ class GNNReparam(torch.nn.Module):
         else:
             self.initial_pos = None
             self._fit_history = None
-    
+        
     def get_num_nodes(self, cg, A, edgelist):
         if cg is not None:
             self.n = cg.cg_modes.shape[0]
@@ -444,8 +445,8 @@ class GNNReparam(torch.nn.Module):
         # we use the latent_sigma to scale the initial position
         # we also add the node attributes to the latent embedding, but we don't learn them
         if self.node_attributes is not None:
-            self.latent_embedding = torch.nn.Parameter(latent_sigma * torch.randn(self.n, self.gnn.hidden_dims[0] - self.node_attributes.shape[1]))
-            self.latent_embedding = torch.cat([self.latent_embedding, self.node_attributes ], dim=1)
+            self.latent_embedding0 = torch.nn.Parameter(latent_sigma * torch.randn(self.n, self.gnn.hidden_dims[0] - self.node_attributes.shape[1]))
+            self.latent_embedding = torch.cat([self.latent_embedding0, self.node_attributes ], dim=1)
         else:        
             self.latent_embedding = torch.nn.Parameter(latent_sigma * torch.randn(self.n, self.gnn.hidden_dims[0]))
         
